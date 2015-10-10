@@ -1,59 +1,187 @@
 #include <pebble.h>
 
-static Window *window;
-static TextLayer *text_layer;
+#define RADIUS_MAX 80
 
-static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
-  text_layer_set_text(text_layer, "Select");
+#define RADIUS_MIN 10
+
+#define BORDER_OFFSET 10
+
+static Window *s_window;
+static Layer *s_layer;
+
+static uint8_t s_hour;
+static uint8_t s_minute;
+static uint8_t s_second;
+
+GPoint points[8*12];
+int points_len;
+
+/**
+   Pass in the current x,y coordinates for the circle, the current
+   radius, the change in radius, and the quadrant you are drawing an
+   arc in (1, 2, 3, or 4).
+   Returns a new center x,y coordinate and a new radius.
+ */
+void create_spiral_coords(int cur_center_x,
+                          int cur_center_y,
+                          int radius,
+                          int radius_delta,
+                          int quadrant,
+                          int* new_center_x,
+                          int* new_center_y,
+                          int* new_radius)
+{
+  (*new_radius) = radius - radius_delta;
+  switch (quadrant) {
+  case 0:
+    (*new_center_x) = cur_center_x;
+    (*new_center_y) = cur_center_y - radius + *new_radius;
+    break;
+  case 1:
+    (*new_center_x) = cur_center_x + radius - *new_radius;
+    (*new_center_y) = cur_center_y;
+    break;
+  case 2:
+    (*new_center_x) = cur_center_x;
+    (*new_center_y) = cur_center_y + radius - (*new_radius);
+    break;
+  default:
+    (*new_center_x) = cur_center_x - radius + (*new_radius);
+    (*new_center_y) = cur_center_y;
+  }
 }
 
-static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
-  text_layer_set_text(text_layer, "Up");
+
+static inline GRect rect_from_center_and_radius(GPoint center, int radius){
+  return GRect(center.x - radius, center.y - radius,
+               radius * 2, radius * 2);
 }
 
-static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
-  text_layer_set_text(text_layer, "Down");
-}
+// Update the watchface display
+static void update_display(Layer *layer, GContext *ctx) {
+  APP_LOG(APP_LOG_LEVEL_INFO, "update_display");
 
-static void click_config_provider(void *context) {
-  window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
-  window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
-  window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
+  int minute_hand_deg = s_minute * 360 / 60;
+  int hour_hand_deg = s_hour * 360 / 60;
+
+  GRect bounds = layer_get_bounds(layer);
+  // GRect rect = rect_from_center_and_radius(GPoint(90, 90), RADIUS_MAX);
+  // graphics_fill_radial(ctx, rect, GOvalScaleModeFitCircle,
+  //                      1, DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(90));
+  int curr_center_x = 90,
+      curr_center_y = 90,
+      radius = RADIUS_MAX,
+      new_center_x, new_center_y, new_radius;
+
+  GRect rect = rect_from_center_and_radius(
+    GPoint(curr_center_x, curr_center_y), radius);
+  graphics_fill_radial(ctx, rect, GOvalScaleModeFitCircle,
+                       1, DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(90));
+  for (int i = 1; i < 4*6; i++){
+    create_spiral_coords(curr_center_x, curr_center_y, radius,
+                         2, i%4, &new_center_x, &new_center_y,
+                         &new_radius);
+    APP_LOG(APP_LOG_LEVEL_INFO, "new_center_x: %d, new_center_y: %d, new_radius: %d", new_center_x, new_center_y, new_radius);
+
+    rect = rect_from_center_and_radius(
+        GPoint(new_center_x, new_center_y), new_radius);
+    graphics_fill_radial(ctx, rect, GOvalScaleModeFitCircle,
+                       1, DEG_TO_TRIGANGLE((i % 4)* 90),
+                       DEG_TO_TRIGANGLE((i % 4) * 90 + 90));
+    curr_center_x = new_center_x;
+    curr_center_y = new_center_y;
+    radius = new_radius;
+  }
+
+  curr_center_x = 90;
+  curr_center_y = 90;
+  radius = RADIUS_MAX - 4;
+
+  graphics_context_set_fill_color(ctx, GColorRed);
+  rect = rect_from_center_and_radius(
+    GPoint(curr_center_x, curr_center_y), radius);
+  graphics_fill_radial(ctx, rect, GOvalScaleModeFitCircle,
+                       1, DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(90));
+
+  for (int i = 1; i < 4*6; i++){
+    create_spiral_coords(curr_center_x, curr_center_y, radius,
+                         2, i%4, &new_center_x, &new_center_y,
+                         &new_radius);
+    APP_LOG(APP_LOG_LEVEL_INFO, "new_center_x: %d, new_center_y: %d, new_radius: %d", new_center_x, new_center_y, new_radius);
+
+    rect = rect_from_center_and_radius(
+        GPoint(new_center_x, new_center_y), new_radius);
+    graphics_fill_radial(ctx, rect, GOvalScaleModeFitCircle,
+                       1, DEG_TO_TRIGANGLE((i % 4)* 90),
+                       DEG_TO_TRIGANGLE((i % 4) * 90 + 90));
+    curr_center_x = new_center_x;
+    curr_center_y = new_center_y;
+    radius = new_radius;
+  }
+
+  // graphics_context_set_antialiased(ctx, true);
+
+  GPoint minute_hand_point = gpoint_from_polar(GRect(10, 10, 160, 160),
+                                               GOvalScaleModeFitCircle,
+                                               minute_hand_deg);
+  APP_LOG(APP_LOG_LEVEL_INFO, "minute_hand_point: x: %d, y: %d", minute_hand_point.x, minute_hand_point.y);
+  graphics_context_set_fill_color(ctx, GColorYellow);
+  graphics_context_set_stroke_width(ctx, 3);
+  graphics_draw_pixel(ctx, minute_hand_point);
+
+
+
+
 }
 
 static void window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
 
-  text_layer = text_layer_create((GRect) { .origin = { 0, 72 }, .size = { bounds.size.w, 20 } });
-  text_layer_set_text(text_layer, "Press a button");
-  text_layer_set_text_alignment(text_layer, GTextAlignmentCenter);
-  layer_add_child(window_layer, text_layer_get_layer(text_layer));
+  s_layer = layer_create(layer_get_bounds(window_get_root_layer(s_window)));
+  layer_add_child(window_get_root_layer(s_window), s_layer);
+  layer_set_update_proc(s_layer, update_display);
+  layer_mark_dirty(s_layer);
 }
 
 static void window_unload(Window *window) {
-  text_layer_destroy(text_layer);
+  layer_destroy(s_layer);
+}
+
+static void update_time(struct tm *tick_time) {
+  s_hour = tick_time->tm_hour;
+  s_minute = tick_time->tm_min;
+  s_second = tick_time->tm_sec;
+  layer_mark_dirty(s_layer);
+}
+
+static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
+  APP_LOG(APP_LOG_LEVEL_INFO, "tick!");
+  update_time(tick_time);
 }
 
 static void init(void) {
-  window = window_create();
-  window_set_click_config_provider(window, click_config_provider);
-  window_set_window_handlers(window, (WindowHandlers) {
+  s_window = window_create();
+  window_set_window_handlers(s_window, (WindowHandlers) {
     .load = window_load,
     .unload = window_unload,
   });
   const bool animated = true;
-  window_stack_push(window, animated);
+  window_stack_push(s_window, animated);
+
+  // Start the timer
+  time_t start = time(NULL);
+  tick_timer_service_subscribe(SECOND_UNIT, tick_handler);
+  update_time(localtime(&start));
+
 }
 
 static void deinit(void) {
-  window_destroy(window);
+  window_destroy(s_window);
 }
 
 int main(void) {
   init();
-
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "Done initializing, pushed window: %p", window);
 
   app_event_loop();
   deinit();
