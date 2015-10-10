@@ -22,14 +22,14 @@ int points_len;
    arc in (1, 2, 3, or 4).
    Returns a new center x,y coordinate and a new radius.
  */
-void create_spiral_coords(int cur_center_x,
-                          int cur_center_y,
-                          int radius,
-                          int radius_delta,
-                          int quadrant,
-                          int* new_center_x,
-                          int* new_center_y,
-                          int* new_radius)
+static void create_spiral_coords(int cur_center_x,
+                                 int cur_center_y,
+                                 int radius,
+                                 int radius_delta,
+                                 int quadrant,
+                                 int* new_center_x,
+                                 int* new_center_y,
+                                 int* new_radius)
 {
   (*new_radius) = radius - radius_delta;
   switch (quadrant) {
@@ -51,11 +51,69 @@ void create_spiral_coords(int cur_center_x,
   }
 }
 
-
 static inline GRect rect_from_center_and_radius(GPoint center, int radius){
   return GRect(center.x - radius, center.y - radius,
                radius * 2, radius * 2);
 }
+
+/**
+   MAX_RADIUS is the maximum radius for the watch
+   RADIUS_DELTA is the amount the radius decreases between each
+   quadrant
+   new_center_x/y is the new center x/y for the spiral
+   new_radius is the new radius to use for drawing
+   new_angle is the angle to start drawing the arc from
+ */
+static void
+get_spiral_center_radius_start_angle_for_cur_time(int MAX_RADIUS,
+                                                  int RADIUS_DELTA,
+                                                  int* new_center_x,
+                                                  int* new_center_y,
+                                                  int* new_radius,
+                                                  int* new_angle)
+{
+  int cur_hour = s_hour % 12;
+  int cur_center_x = 90;
+  int cur_center_y = 90;
+  int cur_radius = MAX_RADIUS;
+  int hour_quadrant = s_hour / 15;
+  for (int i = 0; i < cur_hour; i++) {
+    for (int j = 0; j < 4; j++) {
+      if (i == 0 && j == 0) {
+        // ignore the first arc
+        continue;
+      }
+      create_spiral_coords(cur_center_x,
+                           cur_center_y,
+                           cur_radius,
+                           RADIUS_DELTA,
+                           j,
+                           &cur_center_x,
+                           &cur_center_y,
+                           &cur_radius);
+    }
+  }
+  for (int i = 0; i < hour_quadrant; i++) {
+    if (cur_hour == 0 && i == 0) {
+      // ignore first arc
+      continue;
+    }
+    create_spiral_coords(cur_center_x,
+                         cur_center_y,
+                         cur_radius,
+                         RADIUS_DELTA,
+                         i,
+                         &cur_center_x,
+                         &cur_center_y,
+                         &cur_radius);
+  }
+
+  (*new_center_x) = cur_center_x;
+  (*new_center_y) = cur_center_y;
+  (*new_radius) = cur_radius;
+  (*new_angle) = cur_hour * 360 / 12;
+}
+                                                              
 
 // Update the watchface display
 static void update_display(Layer *layer, GContext *ctx) {
